@@ -1,38 +1,38 @@
 // ==UserScript==
-// @name         RS Helper Script
+// @name         RS2JiraSync Script
 // @namespace    http://reports.scand/
 // @version      0.0.1
-// @description  RS Helper Script
-// @author       Aleksandr Baliunov <baliunov@scand.com>
+// @description  RS to Jira Synchronization Helper Script
+// @author       Aleksandr Baliunov
+// @author       Alexander Chernyakevich
 // @match        http://reports.scand/ureports.php
+// @grant        GM_log
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_xmlhttpRequest
-// @grant        GM_cookie
-// @grant        GM_log
-// @grant        GM_registerMenuCommand
 // @grant        GM_deleteValue
+// @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
 // ==/UserScript==
 
 
 (function() {
     'use strict';
 
+    function changeJiraToken() {
+        GM_setValue("rs2jira.jira.token", prompt("JIRA token", GM_getValue("rs2jira.jira.token", "some-jira-token-should-be-entered-here")));
+    }
+
+    GM_registerMenuCommand('Change JIRA token', changeJiraToken);
+
     const configs = [
         {
             baseUrl: 'https://route4gas.atlassian.net/',
             idRegex: /^\((DEV-\d+)\)\s/,
             textRegex: /^\(DEV-\d+\)\s(.+)$/,
-            token: null,
+            token: GM_getValue("rs2jira.jira.token", ""),
             headers: null,
         }
     ];
-
-    GM_registerMenuCommand('Change JIRA token', changeJiraToken);
-
-    function changeJiraToken() {
-        GM_setValue("rs2jira.jira.token", prompt("JIRA token", GM_getValue("rs2jira.jira.token", "some-jira-token-should-be-entered-here")));
-    }
 
     const padStart = (number) => number < 10 ? `0${number}` : `${number}`;
 
@@ -169,7 +169,7 @@
                         const {worklogs} = respData;
 
                         const matchedWorklog = matchWorklog({date, time, scandTimeSpentSeconds}, worklogs);
-                        const btnText = matchedWorklog ? 'Delete&nbsp;report!' : 'Sync&nbsp;report!';
+                        const btnText = matchedWorklog ? 'Delete&nbsp;report' : 'Sync&nbsp;report';
 
                         const newButton = createNewButton(btnText);
                         actionTd.appendChild(newButton);
