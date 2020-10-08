@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jira Helper Script
+// @name         RS Helper Script
 // @namespace    http://reports.scand/
 // @version      0.0.1
-// @description  Jira Helper Script
+// @description  RS Helper Script
 // @author       Aleksandr Baliunov <baliunov@scand.com>
 // @match        http://reports.scand/ureports.php
 // @grant        GM_getValue
