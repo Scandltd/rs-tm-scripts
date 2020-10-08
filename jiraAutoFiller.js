@@ -11,19 +11,47 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_cookie
 // @grant        GM_log
+// @grant        GM_registerMenuCommand
+// @grant        GM_deleteValue
 // ==/UserScript==
 
 // const cookieNames = ['cloud.session.token', 'atlassian.xsrf.token'];
+
+const formatNumber = (number) => number < 10 ? `0${number}` : `${number}`;
+
+function changeJiraToken(baseUrl) {
+    if (!baseUrl) {
+        const config = configs.find(config => !config.token);
+        if (config) {
+            ({baseUrl} = config);
+        }
+        else {
+            ({baseUrl} = configs[0]);
+        }
+    }
+    GM_setValue("jira.token", prompt("JIRA token for " + baseUrl, GM_getValue("jira.token", "some-jira-token-should-be-entered-here")));
+}
 
 const configs = [
     {
         baseUrl: 'http://your_jira__domen/',
         idRegex: /^\((DEV-\d+)\)\s/,
         textRegex: /^\(DEV-\d+\)\s(.+)$/,
-        token: btoa('your_jira_email:your_jira_token'),
+        token: null,
         headers: null,
     }
 ];
+
+function matchFrame() {
+    const frames = document.getElementsByTagName('frame');
+
+    let matchedFrame;
+    for (const frame of frames) {
+        if (frame.name === 'pdetails') {
+            return frame;
+        }
+    }
+}
 
 function getNewButton(btnText) {
     const button = document.createElement("button");
@@ -33,6 +61,13 @@ function getNewButton(btnText) {
     button.style.backgroundColor = '#FFFFFF';
     button.innerHTML = btnText;
     return button;
+}
+
+function getActiveTd() {
+    const activeTd = document.createElement("td");
+    activeTd.style.backgroundColor = '#FFFFFF';
+    activeTd.style.padding = 0;
+    return activeTd;
 }
 
 function getheaders(token) {
@@ -66,18 +101,86 @@ function getheaders(token) {
     };
 }
 
+function getRawData(activeTd) {
+    const descriptionTd = activeTd.previousElementSibling;
+    const hoursTd = descriptionTd.previousElementSibling;
+    const timeTd = hoursTd.previousElementSibling;
+    const dateTd = timeTd.previousElementSibling;
+
+    const date = dateTd.innerText;
+    const time = timeTd.innerText;
+    const hours = +hoursTd.innerText;
+    const scandTimeSpentSeconds = hours * 3600;
+    const description = descriptionTd.innerText;
+
+    return {
+        date,
+        time,
+        hours,
+        scandTimeSpentSeconds,
+        description,
+    };
+}
+
+function checkConfig(configs, description) {
+    let checkedDescription = null;
+    const foundConfig = configs.find(config => {
+        checkedDescription = config.idRegex.exec(description);
+        if (checkedDescription) {
+            if (!config.headers) {
+                while (!(config.token = GM_getValue("jira.token", null))) {
+                    changeJiraToken(config.baseUrl);
+                }
+                config.headers = getheaders(config.token);
+            }
+            return true;
+        }
+        return false;
+    });
+
+    if (foundConfig) {
+        const {headers, baseUrl, textRegex} = foundConfig;
+        const ticketId = checkedDescription[1];
+        const reportText = textRegex.exec(description)[1];
+
+        return {
+            config: foundConfig,
+            ticketId,
+            reportText,
+        };
+    }
+
+    return null;
+}
+
+const matchWorklog = ({date, time, scandTimeSpentSeconds}, worklogs) => worklogs.find(worklog => {
+    const {comment, started, timeSpent, timeSpentSeconds} = worklog;
+    const dateData = new Date(started);
+    const day = dateData.getDate();
+    const month = dateData.getMonth() + 1;
+    const year = dateData.getFullYear();
+
+    const hours = dateData.getHours();
+    const minutes = dateData.getMinutes();
+    const seconds = dateData.getSeconds();
+
+    const formattedDate = `${formatNumber(day)}-${formatNumber(month)}-${year}`;
+    const formattedTime = `${formatNumber(hours)}:${formatNumber(minutes)}:${formatNumber(seconds)}`;
+
+    if (date === formattedDate && time === formattedTime && scandTimeSpentSeconds === timeSpentSeconds) {
+        return true;
+    }
+
+    return false;
+});
+
+
 (function() {
     'use strict';
 
-    const frames = document.getElementsByTagName('frame');
+    GM_registerMenuCommand('Change JIRA token', changeJiraToken);
 
-    let matchedFrame;
-    for (const frame of frames) {
-        if (frame.name === 'pdetails') {
-            matchedFrame = frame;
-            break;
-        }
-    }
+    const matchedFrame = matchFrame();
 
     if (matchedFrame) {
         matchedFrame.addEventListener('load', function() {
@@ -87,31 +190,25 @@ function getheaders(token) {
 
             for (let i = 0; i < rows.length - 1; i++) {
                 const row = rows[i];
-                const newTd = document.createElement("td");
-                newTd.style.backgroundColor = '#FFFFFF';
-                newTd.style.padding = 0;
-                row.appendChild(newTd);
+                const activeTd = getActiveTd();
+                row.appendChild(activeTd);
 
-                const scandWorkLog = newTd.previousElementSibling.innerText;
+                const {
+                    date,
+                    time,
+                    hours,
+                    scandTimeSpentSeconds,
+                    description,
+                } = getRawData(activeTd);
 
-                let checkedResult = null;
-                const foundConfig = configs.find(config => {
-                    checkedResult = config.idRegex.exec(scandWorkLog);
-                    if (checkedResult) {
-                        if (!config.headers) {
-                            config.headers = getheaders(config.token);
-                        }
-                        return true;
-                    }
-                    return false;
-                });
-
+                const foundConfig = checkConfig(configs, description);
                 if (foundConfig) {
-                    const {headers, baseUrl, textRegex} = foundConfig;
-                    const ticketId = checkedResult[1];
-                    const reportText = textRegex.exec(scandWorkLog)[1];
-                    console.log({ticketId});
-                    console.log({reportText});
+                    const {
+                        config,
+                        ticketId,
+                        reportText,
+                    } = foundConfig;
+                    const {headers, baseUrl} = config;
 
                     GM_xmlhttpRequest({
                         method: 'GET',
@@ -122,25 +219,16 @@ function getheaders(token) {
                                 const respData = JSON.parse(responseDetails.responseText);
                                 const {worklogs} = respData;
 
-                                const btnText = worklogs.length > 0 ? 'Delete&nbsp;report!' : 'Add&nbsp;report!';
+                                const matchedWorklog = matchWorklog({date, time, scandTimeSpentSeconds}, worklogs);
+                                const btnText = matchedWorklog ? 'Delete&nbsp;report!' : 'Sync&nbsp;report!';
+
                                 const newButton = getNewButton(btnText);
-                                newTd.appendChild(newButton);
+                                activeTd.appendChild(newButton);
 
                                 newButton.addEventListener('click', (event) => {
                                     event.stopPropagation();
                                     event.preventDefault();
 
-                                    GM_log(' ');
-                                    GM_log({ticketId});
-                                    GM_log({reportText});
-                                    // GM_log({responseDetails});
-                                    // GM_log(scandWorkLog);
-                                    GM_log({worklogs: JSON.parse(responseDetails.responseText).worklogs});
-
-                                    worklogs.forEach(worklog => {
-                                        const {comment, started, timeSpent, timeSpentSeconds} = worklog;
-                                        console.log({worklog: {comment, started, timeSpent, timeSpentSeconds}});
-                                    });
                                 });
                             }
                             else {
