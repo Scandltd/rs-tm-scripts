@@ -34,6 +34,10 @@
         }
     ];
 
+    const BASE_PATH = 'rest/api/2/issue/';
+
+    const DATE_REGEX = /^(\d{2})-(\d{2})-(\d{4})$/;
+
     const padStart = (number) => number < 10 ? `0${number}` : `${number}`;
 
     function createNewButton(btnText) {
@@ -60,7 +64,7 @@
         };
     }
 
-    function getReportRawData(actionTd) {
+    function getScandReportRowData(actionTd) {
         const descriptionTd = actionTd.previousElementSibling;
         const hoursTd = descriptionTd.previousElementSibling;
         const timeTd = hoursTd.previousElementSibling;
@@ -75,7 +79,6 @@
         return {
             date,
             time,
-            hours,
             scandTimeSpentSeconds,
             description,
         };
@@ -98,7 +101,7 @@
         });
 
         if (foundConfig) {
-            const {headers, baseUrl, textRegex} = foundConfig;
+            const {textRegex} = foundConfig;
             const ticketId = checkedDescription[1];
             const reportText = textRegex.exec(description)[1];
 
@@ -113,7 +116,7 @@
     }
 
     const matchWorklog = ({date, time, scandTimeSpentSeconds}, worklogs) => worklogs.find(worklog => {
-        const {comment, started, timeSpent, timeSpentSeconds} = worklog;
+        const {started, timeSpentSeconds} = worklog;
         const dateData = new Date(started);
         const day = dateData.getDate();
         const month = dateData.getMonth() + 1;
@@ -126,12 +129,68 @@
         const formattedDate = `${padStart(day)}-${padStart(month)}-${year}`;
         const formattedTime = `${padStart(hours)}:${padStart(minutes)}:${padStart(seconds)}`;
 
-        if (date === formattedDate && time === formattedTime && scandTimeSpentSeconds === timeSpentSeconds) {
-            return true;
-        }
-
-        return false;
+        return date === formattedDate && time === formattedTime && scandTimeSpentSeconds === timeSpentSeconds;
     });
+
+    function syncWorklogInJira(config, reportData, ticketId) {
+        const {date, time, scandTimeSpentSeconds, reportText} = reportData;
+
+        const [_, day, month, year] = DATE_REGEX.exec(date);
+        const started = `${year}-${month}-${day}T${time}.000+0300`; // TODO: Need to check this format ("2017-03-14T10:35:37.095++0300")
+        const {baseUrl, headers} = config;
+
+        const data = {
+            comment: reportText,
+            started,
+            timeSpentSeconds: scandTimeSpentSeconds,
+        };
+
+        /*
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: baseUrl + BASE_PATH + ticketId + '/worklog',
+            data,
+            json: true,
+            headers,
+            onload: function(responseDetails) {
+                if ( responseDetails.status == 201 ) {
+                    GM_log('Sync was successful');
+                }
+                else if ( responseDetails.status == 400 ) {
+                    GM_log('Input is invalid');
+                }
+                else { // responseDetails.status == 403
+                    GM_log('The user does not have permission to add the worklog');
+                }
+            }
+        });
+        */
+    }
+
+    function deleteWorklogFromJira(config, ticketId, id) {
+        const {baseUrl, headers} = config;
+
+        /*
+        GM_xmlhttpRequest({
+            method: 'DELETE',
+            url: baseUrl + BASE_PATH + ticketId + '/worklog/' + id,
+            // json: true,
+            headers,
+            onload: function(responseDetails) {
+                if ( responseDetails.status == 204 ) {
+                    GM_log('Delete was successful');
+                }
+                else if (responseDetails.status == 400) {
+                    GM_log('Input is invalid');
+                }
+                else { // responseDetails.status == 403
+                    GM_log('The user does not have permission to delete the worklog');
+                }
+            }
+        });
+        */
+    }
+
 
     const tables = document.getElementsByTagName('table');
     const lastTable = tables[tables.length - 1];
@@ -145,10 +204,9 @@
         const {
             date,
             time,
-            hours,
             scandTimeSpentSeconds,
             description,
-        } = getReportRawData(actionTd);
+        } = getScandReportRowData(actionTd);
 
         const foundConfig = checkConfig(configs, description);
         if (foundConfig) {
@@ -161,22 +219,30 @@
 
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: baseUrl + 'rest/api/2/issue/' + ticketId + '/worklog',
-                headers: foundConfig.headers,
+                url: baseUrl + BASE_PATH + ticketId + '/worklog',
+                headers,
                 onload: function(responseDetails) {
                     if ( responseDetails.status == 200 ) {
                         const respData = JSON.parse(responseDetails.responseText);
                         const {worklogs} = respData;
-
                         const matchedWorklog = matchWorklog({date, time, scandTimeSpentSeconds}, worklogs);
-                        const btnText = matchedWorklog ? 'Delete&nbsp;report' : 'Sync&nbsp;report';
 
+                        const btnText = matchedWorklog ? 'Delete&nbsp;report' : 'Sync&nbsp;report';
                         const newButton = createNewButton(btnText);
                         actionTd.appendChild(newButton);
 
                         newButton.addEventListener('click', (event) => {
                             event.stopPropagation();
                             event.preventDefault();
+
+                            if (matchedWorklog) {
+                                const {id} = matchedWorklog;
+                                deleteWorklogFromJira(config, ticketId, id);
+                            }
+                            else {
+                                const reportData = {date, time, scandTimeSpentSeconds, reportText};
+                                syncWorklogInJira(config, reportData, ticketId);
+                            }
 
                         });
                     }
@@ -185,7 +251,6 @@
                     }
                 }
             });
-
         }
     }
 })();
