@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         RS2JiraSync Script
+// @name         RS2JiraSync
 // @namespace    https://github.com/Scandltd/rs-tm-scripts/
 // @version      0.0.1
 // @description  RS to Jira Synchronization Helper Script
@@ -9,6 +9,7 @@
 // @grant        GM_log
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
 // ==/UserScript==
@@ -16,27 +17,172 @@
 (function() {
     'use strict';
 
+    const DEBUG = false;
+
+    // ----- CONFIGURATION RELATED PART START -----
+    const configHelper = new function () {
+        this.NAMESPACE = "rs2jira.config.";
+        this.JIRA_BASEURL = ".jira.baseUrl";
+        this.JIRA_TOKEN = ".jira.token";
+        this.RS_IDREGEXP = ".rs.idRegExp";
+        this.getConfigJiraBaseUrl = function(idx) {
+            return GM_getValue(this.NAMESPACE + idx + this.JIRA_BASEURL, "");
+        }
+        this.getConfigJiraToken = function(idx) {
+            return GM_getValue(this.NAMESPACE + idx + this.JIRA_TOKEN, "");
+        }
+        this.getConfigRsIdRegExp = function(idx) {
+            return GM_getValue(this.NAMESPACE + idx + this.RS_IDREGEXP, "");
+        }
+        this.newConfig = function(jiraBaseUrl, jiraToken, rsIdRegExpStr) {
+            if ( jiraBaseUrl !== "" && jiraToken !== "" && rsIdRegExpStr !== "" ) {
+                return {
+                    baseUrl: jiraBaseUrl,
+                    token: jiraToken,
+                    idRegExp: new RegExp(rsIdRegExpStr)
+                };
+            } else {
+                return null;
+            }
+        }
+        this.loadConfig = function(idx) {
+            let config = this.newConfig(this.getConfigJiraBaseUrl(idx), this.getConfigJiraToken(idx), this.getConfigRsIdRegExp(idx));
+            if ( config == null && DEBUG ) {
+                alert("Something wrong with loaded config #" + idx + "\n" +
+                      this.getConfigInfo(this.getConfigJiraBaseUrl(idx),
+                                         this.getConfigJiraToken(idx),
+                                         this.getConfigRsIdRegExp(idx)));
+            }
+            return config;
+        }
+        this.loadConfigs = function() {
+            let configs = [];
+            let i = 0;
+            let config = this.loadConfig(i);
+            while ( config ) {
+                configs.push(config);
+                i++;
+                config = this.loadConfig(i);
+            }
+            return configs;
+        }
+        this.getConfigInfo = function(jiraBaseUrl, jiraToken, rsIdRegExpStr) {
+            return "\n\tbaseUrl: " + jiraBaseUrl + "\n\ttoken: " + ( DEBUG ? jiraToken : "*****" ) + "\n\tidRegExp: " + rsIdRegExpStr;
+        }
+        this.showConfig = function(idx) {
+            alert("Config #" + idx + "\n" +
+                  this.getConfigInfo(synchronizationConfigs[idx].baseUrl,
+                                     synchronizationConfigs[idx].token,
+                                     synchronizationConfigs[idx].idRegExp.source));
+        }
+        this.showAllConfigs = function() {
+            let alertStr = "";
+            for (let i=0; i < synchronizationConfigs.length; i++) {
+                alertStr += "Config #" + i + "\n" + this.getConfigInfo(synchronizationConfigs[i].baseUrl,
+                                                                       synchronizationConfigs[i].token,
+                                                                       synchronizationConfigs[i].idRegExp.source) + "\n\n";
+            }
+            alert(alertStr);
+        }
+        this.promptConfig = function(advJiraBaseUrl, advRsIdRegExp) {
+            return {
+                jiraBaseUrl: prompt("Enter Jira Base URL", advJiraBaseUrl),
+                jiraToken: prompt("Enter Jira access token", "some-token-should-be-here"),
+                rsIdRegExpStr: prompt("Enter ticket ID parsing RegExp", advRsIdRegExp)
+            }
+        }
+        this.saveConfig = function(idx) {
+            GM_setValue(this.NAMESPACE + idx + this.JIRA_BASEURL, synchronizationConfigs[idx].baseUrl);
+            GM_setValue(this.NAMESPACE + idx + this.JIRA_TOKEN, synchronizationConfigs[idx].token);
+            GM_setValue(this.NAMESPACE + idx + this.RS_IDREGEXP, synchronizationConfigs[idx].idRegExp.source);
+        }
+        this.saveConfigs = function() {
+            for (let i=0; i < synchronizationConfigs.length; i++) {
+                this.saveConfig(i);
+            }
+        }
+        this.removeConfig = function(idx) {
+            if ( confirm("Are sure you would like to remove config #" + idx + "?\n" +
+                         this.getConfigInfo(synchronizationConfigs[idx].baseUrl,
+                                            synchronizationConfigs[idx].token,
+                                            synchronizationConfigs[idx].idRegExp.source)) ) {
+                let lastConfigIdx = synchronizationConfigs.length - 1;
+                GM_deleteValue(this.NAMESPACE + lastConfigIdx + this.JIRA_BASEURL);
+                GM_deleteValue(this.NAMESPACE + lastConfigIdx + this.JIRA_TOKEN);
+                GM_deleteValue(this.NAMESPACE + lastConfigIdx + this.RS_IDREGEXP);
+                synchronizationConfigs.splice(idx, 1);
+                this.saveConfigs();
+                alert("Removed!");
+            } else {
+                alert("Good, you are quite cautious. :)");
+            }
+        }
+    }
+
+    function addSynchronizationConfig() {
+        const {jiraBaseUrl, jiraToken, rsIdRegExpStr} =
+              configHelper.promptConfig("https://<some.organization.here>.atlassian.net/",
+                                        "^\\((OPC-\\d+|PROC-\\d+|S2PPRJ-\\d+|S2PPRJTEST-\\d+)\\)\\s");
+        let config = configHelper.newConfig(jiraBaseUrl, jiraToken, rsIdRegExpStr);
+        if ( config ) {
+            synchronizationConfigs.push(config);
+            let lastConfigIdx = synchronizationConfigs.length - 1;
+            configHelper.saveConfig(lastConfigIdx);
+            alert("Config #" + lastConfigIdx + " successfully added.");
+        } else {
+            alert("Can't update config, something wrong with your data:" +
+                  configHelper.getConfigInfo(jiraBaseUrl, jiraToken, rsIdRegExpStr));
+        }
+    }
+    function changeSynchronizationConfig() {
+        if ( synchronizationConfigs.length > 0 ) {
+            let idx = +prompt("Provide index of config you would like to change (0-" + (synchronizationConfigs.length - 1) + ")", 0);
+            if ( idx < synchronizationConfigs.length ) {
+                let config = synchronizationConfigs[idx];
+                const {jiraBaseUrl, jiraToken, rsIdRegExpStr} = configHelper.promptConfig(config.baseUrl, config.idRegExp.source);
+                config = configHelper.newConfig(jiraBaseUrl, jiraToken, rsIdRegExpStr);
+                if ( config ) {
+                    synchronizationConfigs[idx] = config;
+                    configHelper.saveConfig(idx);
+                    alert("Config #" + idx + " successfully updated.");
+                } else {
+                    alert("Can't update config, something wrong with your data:" +
+                          configHelper.getConfigInfo(jiraBaseUrl, jiraToken, rsIdRegExpStr));
+                }
+            } else {
+                alert("No config for index " + idx + " is available. Try other!");
+            }
+        } else {
+            alert("No configs to change are available. First add any config!");
+        }
+    }
+    function showSynchronizationConfigs() {
+        configHelper.showAllConfigs();
+    }
+    function removeSynchronizationConfig() {
+        if ( synchronizationConfigs.length > 0 ) {
+            let idx = +prompt("Provide index of config you would like to remove (0-" + (synchronizationConfigs.length - 1) + ")",
+                              synchronizationConfigs.length - 1);
+            if ( idx < synchronizationConfigs.length ) {
+                configHelper.removeConfig(idx);
+            } else {
+                alert("No config for index " + idx + " is available. Try other!");
+            }
+        } else {
+            alert("No configs available at all!");
+        }
+    }
+    GM_registerMenuCommand('Add synchronization config', addSynchronizationConfig);
+    GM_registerMenuCommand('Show synchronization configs', showSynchronizationConfigs);
+    GM_registerMenuCommand('Change synchronization config', changeSynchronizationConfig);
+    GM_registerMenuCommand('Remove synchronization config', removeSynchronizationConfig);
+
+    let synchronizationConfigs = configHelper.loadConfigs();
+
+    // ----- CONFIGURATION RELATED PART END -----
+
     const ISSUE_BROWSE_PATH = "browse/";
     const ISSUE_REST_PATH = 'rest/api/2/issue/';
-
-    // FIXME: Remove hardcoding of configuration
-    GM_setValue("rs2jira.config.0.jira.baseUrl", "https://some-organization.atlassian.net/");
-    GM_setValue("rs2jira.config.0.jira.token", "some-token-should-be-here");
-    GM_setValue("rs2jira.config.0.rs.ticketIdRegEx", "^\\((SOMEPROJECTID1-\\d+|SOMEPROJECTID1-\\d+)\\)\\s");
-
-    // TODO: Add Config loading
-    const synchronizationConfigs = [
-        {
-            baseUrl: GM_getValue("rs2jira.config.0.jira.baseUrl", ""),
-            token: GM_getValue("rs2jira.config.0.jira.token", ""),
-            idRegex: new RegExp(GM_getValue("rs2jira.config.0.rs.ticketIdRegEx", ""))
-        }
-    ];
-
-    // TODO: implemnt configs handling:
-    // Add config - detect last available config, increase index, ask every config property and store for index.
-    // Change config - prompt index, ask every config property and store for index.
-    // Delete config - prompt for index, shift all configs by index and remove the last one.
 
     function getRSReportFromTR(reportTR) {
         // Could depend on project/user tab, user/teamlead/PM/admin role:
@@ -68,7 +214,7 @@
     function getMatchingReportSynchronizationConfig(description) {
         let config = null;
         for (let i = 0; i < synchronizationConfigs.length; i++) {
-            if ( synchronizationConfigs[i].idRegex.test(description) ) {
+            if ( synchronizationConfigs[i].idRegExp.test(description) ) {
                 config = synchronizationConfigs[i];
                 break;
             }
@@ -86,7 +232,7 @@
 
         let reportSyncConfig = getMatchingReportSynchronizationConfig(rsReport.description);
         if ( reportSyncConfig ) {
-            let matches = reportSyncConfig.idRegex.exec(rsReport.description);
+            let matches = reportSyncConfig.idRegExp.exec(rsReport.description);
             let ticketId = matches[matches.length-1];
             let text = rsReport.description.substring(matches[0].length);
 
@@ -94,11 +240,11 @@
             rsReport.descriptionTD.innerHTML = rsReport.descriptionTD.innerHTML.replace(
                 ticketId, '<a href="' + reportSyncConfig.baseUrl + ISSUE_BROWSE_PATH + ticketId + '" target="_blank">' + ticketId + '</a>');
 
-            // check if report was synced
+            // TODO: check if report was synced
             if (true) {
-                // Add button to remove worklog in Jira
+                // TODO: Add button to remove worklog in Jira
             } else {
-                // Add button to create worklog in Jira
+                // TODO: Add button to create worklog in Jira
             }
         }
     }
