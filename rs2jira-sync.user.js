@@ -6,6 +6,7 @@
 // @author       Aleksandr Baliunov
 // @author       Alexander Chernyakevich
 // @match        http://reports.scand/ureports.php
+// @match        https://reports.scand.by/ureports.php
 // @grant        GM_log
 // @grant        GM_getValue
 // @grant        GM_setValue
