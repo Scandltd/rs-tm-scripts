@@ -173,10 +173,10 @@
             alert("No configs available at all!");
         }
     }
-    GM_registerMenuCommand('Add synchronization config', addSynchronizationConfig);
-    GM_registerMenuCommand('Show synchronization configs', showSynchronizationConfigs);
-    GM_registerMenuCommand('Change synchronization config', changeSynchronizationConfig);
-    GM_registerMenuCommand('Remove synchronization config', removeSynchronizationConfig);
+    GM_registerMenuCommand('Add synchronization config', addSynchronizationConfig, 'a');
+    GM_registerMenuCommand('Show synchronization configs', showSynchronizationConfigs, 's');
+    GM_registerMenuCommand('Change synchronization config', changeSynchronizationConfig, 'c');
+    GM_registerMenuCommand('Remove synchronization config', removeSynchronizationConfig, 'r');
 
     let synchronizationConfigs = configHelper.loadConfigs();
 
