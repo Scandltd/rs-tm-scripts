@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RS2JiraSync
 // @namespace    https://github.com/Scandltd/rs-tm-scripts/
-// @version      0.0.1
+// @version      0.0.2
 // @description  RS to Jira Synchronization Helper Script
 // @author       Aleksandr Baliunov
 // @author       Alexander Chernyakevich
