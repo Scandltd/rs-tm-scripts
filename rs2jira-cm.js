@@ -1,3 +1,7 @@
+const DEBUG = false;
+
+GM_log("dddd");
+
 // ----- CONFIGURATION MANAGEMENT RELATED PART START -----
 const configHelper = new function () {
     this.NAMESPACE = "rs2jira.config.";
