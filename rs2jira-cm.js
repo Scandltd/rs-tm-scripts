@@ -1,8 +1,6 @@
-const DEBUG = false;
-
-GM_log("dddd");
-
-// ----- CONFIGURATION MANAGEMENT RELATED PART START -----
+/*
+ * code belows provides possibility to add/edit/remove Jira instances configuration 
+ */
 const configHelper = new function () {
     this.NAMESPACE = "rs2jira.config.";
     this.JIRA_BASEURL = ".jira.baseUrl";
@@ -161,6 +159,3 @@ GM_registerMenuCommand('Change synchronization config', changeSynchronizationCon
 GM_registerMenuCommand('Remove synchronization config', removeSynchronizationConfig, 'r');
 
 let synchronizationConfigs = configHelper.loadConfigs();
-
-// ----- CONFIGURATION MANAGEMENT RELATED PART END -----
-
